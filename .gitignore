@@ -1,0 +1,13 @@
+# .gitignore 內容
+# Python 相關
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# Streamlit/Plotly 相關 (通常不需要，但以防萬一)
+.streamlit/
+.ipynb_checkpoints/
+
+# 數據檔案 (你的 output 資料夾)
+output/

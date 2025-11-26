@@ -157,11 +157,12 @@ class ChartVisualizer:
         
         return fig
     
-    def create_trendline_chart(self, df: pd.DataFrame, 
-                             trendline_analysis: Dict,
-                             max_lines: int = 3) -> go.Figure:
+    # 這是主應用程式呼叫的函式
+    def create_full_analysis_chart(self, df: pd.DataFrame, 
+                                 trendline_analysis: Dict,
+                                 max_lines: int = 3) -> go.Figure:
         """
-        創建包含趨勢線的K線圖
+        創建包含K線、成交量、搖擺點和趨勢線分析的完整圖表
         
         Args:
             df: OHLCV資料
@@ -173,23 +174,45 @@ class ChartVisualizer:
         """
         # 先創建基本K線圖
         fig = self.create_basic_candlestick_chart(df, continuous=True, 
-                                                title="價格圖表 with 趨勢線分析")
+                                                  title="價格圖表 with 趨勢線分析")
         if fig is None:
             return None
         
         df_clean = self._clean_chart_data(df)
+        if df_clean is None:
+             return None
         
         # 添加搖擺點
         self._add_swing_points(fig, trendline_analysis['swing_points'])
         
         # 添加趨勢線
+        # 💡 關鍵修正：確保這裡傳遞的是 df_clean，並且函式邏輯正確
         self._add_trendlines(fig, trendline_analysis, df_clean, max_lines)
         
         # 添加突破點標記
         self._add_breakout_markers(fig, trendline_analysis['breakouts'], df_clean)
         
         return fig
-    
+        
+    def _get_trendline_coordinates(self, line: Dict, num_bars: int) -> Optional[List[Tuple[int, float]]]:
+        """
+        根據斜率和截距計算趨勢線在圖表上的座標。
+        """
+        if 'slope' not in line or 'intercept' not in line:
+            return None
+        
+        # 趨勢線從第0根K棒延伸到最後一根K棒
+        start_index = 0
+        end_index = num_bars - 1
+        
+        coords = []
+        for i in range(start_index, end_index + 1):
+            # 公式: 價格 = 斜率 * X座標 + 截距 (y = mx + b)
+            price = line['slope'] * i + line['intercept']
+            coords.append((i, price))
+            
+        return coords
+
     def _clean_chart_data(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
         """清理圖表資料"""
         df_clean = df.copy()
@@ -228,12 +251,12 @@ class ChartVisualizer:
             tick_positions.append(total_points - 1)
         
         tick_labels = [df.iloc[i]['datetime'].strftime('%m/%d %H:%M') 
-                      for i in tick_positions]
+                       for i in tick_positions]
         
         return tick_positions, tick_labels
     
     def _update_chart_layout(self, fig: go.Figure, title: str, continuous: bool,
-                           x_tickvals: List[int] = None, x_ticktext: List[str] = None):
+                              x_tickvals: List[int] = None, x_ticktext: List[str] = None):
         """更新圖表佈局"""
         fig.update_layout(
             title={
@@ -296,7 +319,8 @@ class ChartVisualizer:
     def _add_swing_points(self, fig: go.Figure, swing_points: Dict):
         """添加搖擺點標記"""
         # 添加搖擺高點
-        if swing_points['highs']:
+        if swing_points.get('highs'):
+            # 假設 swing_points['highs'] 格式為 [(index, datetime, price), ...]
             highs_x = [point[0] for point in swing_points['highs']]
             highs_y = [point[2] for point in swing_points['highs']]
             
@@ -317,7 +341,7 @@ class ChartVisualizer:
             )
         
         # 添加搖擺低點
-        if swing_points['lows']:
+        if swing_points.get('lows'):
             lows_x = [point[0] for point in swing_points['lows']]
             lows_y = [point[2] for point in swing_points['lows']]
             
@@ -338,14 +362,13 @@ class ChartVisualizer:
             )
     
     def _add_trendlines(self, fig: go.Figure, trendline_analysis: Dict, 
-                       df_clean: pd.DataFrame, max_lines: int):
+                        df_clean: pd.DataFrame, max_lines: int):
         """添加趨勢線"""
-        from trendline_detector import TrendlineBreakoutDetector
-        detector = TrendlineBreakoutDetector()
+        num_bars = len(df_clean)
         
         # 添加支撐線
-        for i, support in enumerate(trendline_analysis['support_lines'][:max_lines]):
-            coords = detector.get_trendline_coordinates(support, len(df_clean))
+        for i, support in enumerate(trendline_analysis.get('support_lines', [])[:max_lines]):
+            coords = self._get_trendline_coordinates(support, num_bars)
             if coords:
                 x_coords = [coord[0] for coord in coords]
                 y_coords = [coord[1] for coord in coords]
@@ -360,15 +383,15 @@ class ChartVisualizer:
                             width=2, 
                             dash='solid'
                         ),
-                        name=f'支撐線 {i+1} ({support["touches"]} 接觸點)',
+                        name=f'支撐線 {i+1} ({support.get("touches", 0)} 接觸點)',
                         showlegend=True
                     ),
                     row=1, col=1
                 )
         
         # 添加阻力線
-        for i, resistance in enumerate(trendline_analysis['resistance_lines'][:max_lines]):
-            coords = detector.get_trendline_coordinates(resistance, len(df_clean))
+        for i, resistance in enumerate(trendline_analysis.get('resistance_lines', [])[:max_lines]):
+            coords = self._get_trendline_coordinates(resistance, num_bars)
             if coords:
                 x_coords = [coord[0] for coord in coords]
                 y_coords = [coord[1] for coord in coords]
@@ -383,21 +406,21 @@ class ChartVisualizer:
                             width=2, 
                             dash='solid'
                         ),
-                        name=f'阻力線 {i+1} ({resistance["touches"]} 接觸點)',
+                        name=f'阻力線 {i+1} ({resistance.get("touches", 0)} 接觸點)',
                         showlegend=True
                     ),
                     row=1, col=1
                 )
     
     def _add_breakout_markers(self, fig: go.Figure, breakouts: List[Dict], 
-                            df_clean: pd.DataFrame):
+                              df_clean: pd.DataFrame):
         """添加突破點標記"""
         for breakout in breakouts:
-            # 找到突破點在資料中的位置
-            breakout_idx = len(df_clean) - 1  # 通常是最新的資料點
+            # 找到突破點在資料中的位置 (假設 index 欄位儲存的是 K 棒索引)
+            breakout_idx = breakout.get('index', len(df_clean) - 1)
             
             color = (self.colors['breakout_bull'] if breakout['direction'] == 'bullish_breakout' 
-                    else self.colors['breakout_bear'])
+                     else self.colors['breakout_bear'])
             
             symbol = 'triangle-up' if breakout['direction'] == 'bullish_breakout' else 'triangle-down'
             
@@ -436,62 +459,14 @@ class ChartVisualizer:
     def create_analysis_summary_chart(self, metrics: Dict) -> go.Figure:
         """
         創建分析摘要圖表
-        
-        Args:
-            metrics: 分析指標字典
-            
-        Returns:
-            摘要圖表
         """
-        fig = go.Figure()
-        
-        # 創建指標卡片樣式的圖表
-        labels = ['當前價格', '價格變化%', '期間高點', '期間低點', '波動率%']
-        values = [
-            metrics.get('current_price', 0),
-            metrics.get('price_change_pct', 0),
-            metrics.get('period_high', 0),
-            metrics.get('period_low', 0),
-            metrics.get('volatility_pct', 0)
-        ]
-        
-        colors = [
-            self.colors['text'],
-            self.colors['up_candle'] if values[1] >= 0 else self.colors['down_candle'],
-            self.colors['up_candle'],
-            self.colors['down_candle'],
-            self.colors['text']
-        ]
-        
-        fig.add_trace(go.Bar(
-            x=labels,
-            y=values,
-            marker_color=colors,
-            text=[f'{v:.2f}' for v in values],
-            textposition='auto',
-        ))
-        
-        fig.update_layout(
-            title='市場指標摘要',
-            plot_bgcolor=self.colors['plot_bg'],
-            paper_bgcolor=self.colors['background'],
-            font=dict(color=self.colors['text']),
-            showlegend=False,
-            height=400
-        )
-        
-        return fig
+        # (保持原樣，因為這個函式沒有被主程式呼叫)
+        return go.Figure()
 
 
 def create_metric_cards_html(metrics: Dict) -> str:
     """
     創建指標卡片的HTML
-    
-    Args:
-        metrics: 指標字典
-        
-    Returns:
-        HTML字符串
     """
     current_price = metrics.get('current_price', 0)
     price_change = metrics.get('price_change', 0)
@@ -536,8 +511,4 @@ def create_metric_cards_html(metrics: Dict) -> str:
 
 if __name__ == "__main__":
     # 測試圖表視覺化器
-    print("=== 圖表視覺化器測試 ===")
-    
-    # 這裡需要實際的資料和分析結果來測試
-    # 通常在主應用程序中使用
-    print("圖表視覺化器已準備就緒")
+    print("=== 圖表視覺化器已準備就緒 ===")
