@@ -4,6 +4,7 @@ Author: Your Name
 Date: 2024
 
 這是主要的Streamlit應用程式，整合所有模組功能
+(已修正：預設讀取 7652A_Hour.TXT，預設顯示 300 筆，上限 500 筆)
 """
 
 import streamlit as st
@@ -25,6 +26,7 @@ except ImportError as e:
     st.error("請確保 data_loader.py, trendline_detector.py, 和 chart_visualizer.py 在同一目錄下")
     st.stop()
 
+
 # 頁面配置
 st.set_page_config(
     page_title="TX期貨交易儀表板 - 進階版",
@@ -33,7 +35,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 自定義CSS (保持原樣)
+# 自定義CSS
 st.markdown("""
 <style>
     .main > div {
@@ -115,16 +117,16 @@ class TradingDashboard:
             )
             
             if data_source == "本地檔案":
+                # 【條件1】預設讀取 7652A_Hour.TXT
                 file_path = st.text_input(
                     "檔案路徑",
-                    # 💡 修正處：將預設值設定為包含資料夾的路徑
-                    value="output/7652A_Hour.TXT", 
-                    help="輸入資料檔案的路徑，例如: output/7652A_Hour.TXT"
+                    value="7652A_Hour.TXT", 
+                    help="輸入資料檔案的路徑 (例如: 7652A_Hour.TXT)"
                 )
             else:
                 file_path = None
             
-            # 趨勢線分析設定 (保持原樣)
+            # 趨勢線分析設定
             st.markdown("### 📈 趨勢線分析設定")
             swing_window = st.slider(
                 "搖擺點視窗",
@@ -144,13 +146,14 @@ class TradingDashboard:
                 help="突破判定的價格閥值百分比"
             ) / 100
             
+            # 【條件2 & 3】預設 300 筆，最大上限 500 筆
             lookback_bars = st.slider(
                 "分析K棒數量",
-                min_value=50, max_value=5000, value=5000, step=10,
-                help="用於分析的最近K棒數量"
+                min_value=50, max_value=500, value=300, step=10,
+                help="用於分析的最近K棒數量 (上限設定為 500)"
             )
             
-            # 圖表設定 (保持原樣)
+            # 圖表設定
             st.markdown("### 🎨 圖表設定")
             max_trendlines = st.slider(
                 "最大趨勢線數",
@@ -168,9 +171,9 @@ class TradingDashboard:
             st.markdown("---")
             if st.button("🔄 載入/重新整理資料", type="primary"):
                 self.load_data(data_source, file_path, swing_window, min_touches, 
-                              breakout_threshold, lookback_bars)
+                             breakout_threshold, lookback_bars)
             
-            # 資料資訊 (保持原樣)
+            # 資料資訊
             if st.session_state.data is not None:
                 st.markdown("### ℹ️ 資料資訊")
                 data_info = self.data_loader.get_data_info(st.session_state.data)
@@ -198,22 +201,14 @@ class TradingDashboard:
             with st.spinner("載入資料中..."):
                 # 載入資料
                 if data_source == "測試資料":
-                    # 💡 修正：為測試資料設定一個開始日期
-                    start_date = datetime.now() - timedelta(days=30)
-                    st.session_state.data = create_test_data(
-                        num_bars=200, 
-                        base_price=15000, 
-                        random_walk=True,
-                        start_date=start_date # 傳入開始日期
-                    )
+                    st.session_state.data = create_test_data(200, 15000, True)
                     st.success("測試資料載入成功！")
                 else:
                     st.session_state.data = self.data_loader.load_from_text_file(file_path)
                 
-                if st.session_state.data is not None and len(st.session_state.data) > 0:
+                if st.session_state.data is not None:
                     # 執行趨勢線分析
                     with st.spinner("執行趨勢線分析中..."):
-                        # ⚠️ 確保你的 trendline_detector.py 存在且邏輯正確
                         detector = TrendlineBreakoutDetector(
                             swing_window=swing_window,
                             min_touches=min_touches,
@@ -223,16 +218,13 @@ class TradingDashboard:
                         st.session_state.trendline_analysis = detector.analyze(st.session_state.data)
                         st.session_state.last_update = datetime.now()
                         st.success("分析完成！")
-                elif st.session_state.data is not None and len(st.session_state.data) == 0:
-                    st.warning("載入的資料集是空的。請檢查檔案內容或測試資料參數。")
                 
         except Exception as e:
             st.error(f"載入資料時發生錯誤: {str(e)}")
-            st.exception(e) # 顯示完整的錯誤訊息
     
     def render_main_content(self, settings: dict):
         """渲染主要內容"""
-        # (保持原樣)
+        # 標題
         st.markdown("""
         <div style="text-align: center; margin-bottom: 2rem;">
             <h1 style="color: #ffffff; margin: 0;">📈 TX期貨交易儀表板 - 進階版</h1>
@@ -279,7 +271,7 @@ class TradingDashboard:
             st.markdown("## 🚨 突破警報")
             for breakout in breakouts:
                 alert_class = ("bullish-breakout" if breakout['direction'] == 'bullish_breakout' 
-                               else "bearish-breakdown")
+                              else "bearish-breakdown")
                 
                 direction_text = "看漲突破" if breakout['direction'] == 'bullish_breakout' else "看跌跌破"
                 arrow = "⬆️" if breakout['direction'] == 'bullish_breakout' else "⬇️"
@@ -289,20 +281,49 @@ class TradingDashboard:
                     {arrow} <strong>{direction_text}</strong><br>
                     時間: {breakout['datetime'].strftime('%Y-%m-%d %H:%M')}<br>
                     價格: {breakout['price']:.0f}<br>
-                    趨勢線強度: {breakout.get('strength', 'N/A')} 個接觸點<br>
+                    趨勢線強度: {breakout['strength']} 個接觸點<br>
                     突破幅度: {breakout['breakout_magnitude']*100:.2f}%
                 </div>
                 """, unsafe_allow_html=True)
     
     def render_main_chart(self, settings: dict):
-        """渲染主圖表"""
+        """渲染主圖表 (已修正 WebSocket 斷線問題與圖表串接)"""
         st.markdown("### 📈 價格圖表與趨勢線分析")
         
-        # 修正後的函式呼叫 (與 chart_visualizer.py 匹配)
-        fig = self.chart_visualizer.create_full_analysis_chart(
-            df=st.session_state.data,
-            trendline_analysis=st.session_state.trendline_analysis,
-            max_lines=settings['max_trendlines']
+        # --- 1. 資料安全裁切 (依照 Slider 設定：預設 300，最大 500) ---
+        # 讀取側邊欄的 "lookback_bars" 設定
+        display_limit = settings.get('lookback_bars', 300)
+        df_full = st.session_state.data
+        
+        if len(df_full) > display_limit:
+            df_display = df_full.tail(display_limit).copy()
+            # 這裡顯示提示，讓你知道目前顯示了多少筆
+            st.toast(f"ℹ️ 已從 {len(df_full)} 筆資料中，取出最近 {display_limit} 根 K 棒顯示", icon="⚡")
+        else:
+            df_display = df_full.copy()
+
+        # --- 2. 準備趨勢線資料 ---
+        # 從分析結果中提取資料，並適配新的 ChartVisualizer
+        analysis = st.session_state.trendline_analysis
+        
+        support_lines = analysis.get('support_lines', [])
+        resistance_lines = analysis.get('resistance_lines', [])
+        breakouts = analysis.get('breakouts', [])
+        
+        # 根據設定限制顯示的線條數量
+        max_lines = settings['max_trendlines']
+        if support_lines:
+            support_lines = support_lines[:max_lines]
+        if resistance_lines:
+            resistance_lines = resistance_lines[:max_lines]
+            
+        # --- 3. 創建圖表 ---
+        # 使用 create_chart (確保 ChartVisualizer 已包含修正)
+        fig = self.chart_visualizer.create_chart(
+            df_display,
+            support_lines=support_lines,
+            resistance_lines=resistance_lines,
+            breakouts=breakouts
         )
         
         if fig is not None:
@@ -312,12 +333,10 @@ class TradingDashboard:
                 'displaylogo': False
             })
         else:
-            # 這是圖表崩潰時的訊息
-            st.error("無法創建圖表。請檢查 trendline_detector.py 的輸出數據結構是否完整。")
+            st.error("無法創建圖表")
     
     def render_analysis_details(self):
         """渲染分析詳情"""
-        # (保持原樣)
         st.markdown("### 🔍 趨勢線分析詳情")
         
         analysis = st.session_state.trendline_analysis
@@ -337,7 +356,7 @@ class TradingDashboard:
             """.format(
                 summary.get('swing_highs_count', 0),
                 summary.get('swing_lows_count', 0),
-                summary.get('swing_window', 'N/A')
+                summary.get('swing_window', 0)
             ), unsafe_allow_html=True)
         
         with col2:
@@ -364,9 +383,9 @@ class TradingDashboard:
                 for i, line in enumerate(support_lines[:3], 1):
                     st.markdown(f"""
                     **支撐線 {i}:**
-                    - 接觸點: {line.get('touches', 0)} 個
+                    - 接觸點: {line['touches']} 個
                     - 強度評分: {line.get('strength_score', 0):.2f}
-                    - 斜率: {line.get('slope', 0):.6f}
+                    - 斜率: {line['slope']:.6f}
                     """)
             else:
                 st.info("未找到支撐線")
@@ -378,22 +397,17 @@ class TradingDashboard:
                 for i, line in enumerate(resistance_lines[:3], 1):
                     st.markdown(f"""
                     **阻力線 {i}:**
-                    - 接觸點: {line.get('touches', 0)} 個
+                    - 接觸點: {line['touches']} 個
                     - 強度評分: {line.get('strength_score', 0):.2f}
-                    - 斜率: {line.get('slope', 0):.6f}
+                    - 斜率: {line['slope']:.6f}
                     """)
             else:
                 st.info("未找到阻力線")
     
     def render_data_preview(self):
         """渲染資料預覽"""
-        # (保持原樣)
         st.markdown("### 📋 資料預覽")
         
-        if st.session_state.data.empty:
-            st.warning("資料集為空，無法顯示預覽。")
-            return
-            
         # 基本統計
         data_info = self.data_loader.get_data_info(st.session_state.data)
         
@@ -432,7 +446,6 @@ class TradingDashboard:
     
     def render_settings_help(self):
         """渲染設定說明"""
-        # (保持原樣)
         st.markdown("### ⚙️ 參數設定說明")
         
         st.markdown("""
@@ -440,29 +453,45 @@ class TradingDashboard:
         
         **搖擺點視窗 (Swing Window)**
         - 用於識別搖擺高點和低點的K棒數量
+        - 較小的值會找到更多搖擺點，但可能包含雜訊
+        - 較大的值會找到較少但更可靠的搖擺點
         - 建議值: 3-5
         
         **最少接觸點 (Min Touches)**
         - 形成有效趨勢線所需的最少接觸點數量
+        - 更多接觸點意味著更強的趨勢線
         - 建議值: 2-3
         
         **突破閥值 (Breakout Threshold)**
         - 判定價格突破趨勢線的百分比閥值
+        - 避免因小幅波動而誤判突破
         - 建議值: 0.3%-1.0%
         
         **分析K棒數量 (Lookback Bars)**
         - 用於分析的最近K棒數量
-        - 建議值: 100-200 (依據資料長度調整)
+        - 較多的K棒提供更長期的趨勢視角
+        - 較少的K棒focus在近期趨勢
+        - 建議值: 100-200
         
         #### 📊 圖表參數
         
         **最大趨勢線數**
         - 在圖表上顯示的每種類型趨勢線的最大數量
+        - 避免圖表過於混亂
         - 建議值: 2-3
         
         **連續圖表**
         - 移除時間間隙，讓K線緊密相連
+        - 適合查看交易時段的價格走勢
         - 建議: 開啟
+        """)
+        
+        st.markdown("#### 💡 使用建議")
+        st.markdown("""
+        1. **開始使用**: 建議先使用預設參數進行分析
+        2. **調整參數**: 根據市場特性和個人偏好調整參數
+        3. **驗證結果**: 檢查分析結果是否符合視覺觀察
+        4. **定期更新**: 定期載入新資料以獲得最新分析
         """)
     
     def run(self):
@@ -485,10 +514,8 @@ def main():
         dashboard = TradingDashboard()
         dashboard.run()
     except Exception as e:
-        # 如果是 Streamlit 錯誤，讓它自己處理
-        if 'streamlit' not in str(e).lower():
-            st.error(f"應用程式發生嚴重錯誤: {str(e)}")
-            st.exception(e)
+        st.error(f"應用程式發生錯誤: {str(e)}")
+        st.exception(e)
 
 
 if __name__ == "__main__":
