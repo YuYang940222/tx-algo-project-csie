@@ -1,275 +1,200 @@
 """
-圖表視覺化模組 (修正版：支援中文欄位自動對應與 K 線修復)
-Author: Modified for Project Compliance
+圖表視覺化模組 - TradingView 風格版
 """
 
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 from typing import Dict, List, Optional
 
 class ChartVisualizer:
-    """
-    圖表視覺化器類別，負責創建交易圖表
-    """
-    
     def __init__(self, theme: str = 'dark'):
         self.theme = theme
-        self.colors = self._get_color_scheme()
-        
-    def _get_color_scheme(self) -> Dict[str, str]:
-        """設定配色方案 (台股習慣：紅漲綠跌)"""
-        if self.theme == 'dark':
-            return {
-                'background': '#131722',      # 背景色
-                'plot_bg': '#131722',         # 繪圖區背景
-                'text': '#d1d4dc',            # 文字顏色
-                'grid': '#1e222d',            # 格線顏色
-                'up_candle': '#ff5252',       # 漲 (紅)
-                'down_candle': '#00e676',     # 跌 (綠)
-                'volume_up': 'rgba(255, 82, 82, 0.5)',
-                'volume_down': 'rgba(0, 230, 118, 0.5)',
-                'support': '#00e676',         # 支撐線
-                'resistance': '#ff5252',      # 壓力線
-                'breakout': '#ff9800'         # 突破點
-            }
-        else:
-            return {
-                'background': '#ffffff',
-                'plot_bg': '#ffffff',
-                'text': '#000000',
-                'grid': '#f0f3fa',
-                'up_candle': '#ff5252',
-                'down_candle': '#00e676',
-                'volume_up': 'rgba(255, 82, 82, 0.5)',
-                'volume_down': 'rgba(0, 230, 118, 0.5)',
-                'support': '#00ff00',
-                'resistance': '#ff0000',
-                'breakout': '#ff9800'
-            }
-
-    def _process_data(self, df_in: pd.DataFrame) -> pd.DataFrame:
-        """
-        內部處理：標準化欄位名稱並確保數據為數值
-        這可以解決 'KeyError: datetime' 和 K 線畫不出來的問題
-        """
-        df = df_in.copy()
-        
-        # 1. 中文欄位對照表 (根據您的 kline_60min.TXT)
-        mapping = {
-            '日期': 'date', 'Date': 'date',
-            '時間': 'time', 'Time': 'time',
-            '開盤': 'open', 'Open': 'open',
-            '最高': 'high', 'High': 'high',
-            '最低': 'low', 'Low': 'low',
-            '收盤': 'close', 'Close': 'close',
-            '成交量': 'volume', 'Volume': 'volume'
+        self.colors = {
+            'background': '#131722', # TradingView 經典深色背景
+            'plot_bg': '#131722',
+            'text': '#d1d4dc',
+            'grid': '#363c4e',       # 深色格線
+            'up_candle': '#ef5350',  # 台股紅漲 (若習慣美股綠漲可改 #26a69a)
+            'down_candle': '#26a69a',# 台股綠跌 (若習慣美股紅跌可改 #ef5350)
+            'volume_up': '#ef5350',
+            'volume_down': '#26a69a',
+            'support': '#2962ff',    # 藍色支撐
+            'resistance': '#e91e63', # 粉色壓力
         }
-        df.rename(columns=mapping, inplace=True)
-
-        # 2. 處理時間 (如果日期和時間分開，將其合併)
-        try:
-            if 'datetime' not in df.columns:
-                if 'date' in df.columns and 'time' in df.columns:
-                    # 合併 Date 和 Time
-                    df['datetime'] = pd.to_datetime(df['date'].astype(str) + ' ' + df['time'].astype(str))
-                elif 'date' in df.columns:
-                    df['datetime'] = pd.to_datetime(df['date'])
-            else:
-                df['datetime'] = pd.to_datetime(df['datetime'])
-        except Exception as e:
-            st.error(f"時間格式處理錯誤: {e}")
-
-        # 3. 強制轉型為數字 (解決 '文字型數字' 導致圖表空白的問題)
-        numeric_cols = ['open', 'high', 'low', 'close', 'volume']
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # 移除含有 NaN 的壞資料
-        df.dropna(subset=[c for c in numeric_cols if c in df.columns], inplace=True)
-        
-        return df
-
-    def create_chart(self, df: pd.DataFrame, support_lines: List[dict] = None, 
-                    resistance_lines: List[dict] = None, breakouts: List[dict] = None) -> go.Figure:
-        """
-        主要繪圖方法：繪製 K 線、成交量與趨勢線
-        """
-        if df is None or df.empty:
-            return go.Figure()
-
-        # --- 步驟 1: 資料前處理 ---
-        df = self._process_data(df)
-        if df.empty:
-            return go.Figure()
-
-        # --- 步驟 2: 建立無間隙座標系統 (使用 Index) ---
-        # 這能讓 K 線緊密排列，消除週末空隙
-        df = df.reset_index(drop=True)
-        df['x_idx'] = df.index  # 使用 0, 1, 2... 作為 X 軸
-
-        # 建立 時間 -> Index 的查找表 (用於畫趨勢線)
-        time_map = {pd.Timestamp(dt): idx for idx, dt in zip(df['x_idx'], df['datetime'])}
-
-        # 設定 X 軸刻度顯示 (只顯示部分日期，避免擁擠)
-        tick_vals = df['x_idx'][::max(1, len(df)//10)]
-        tick_text = [dt.strftime('%m-%d %H:%M') for dt in df.iloc[tick_vals]['datetime']]
-
-        # --- 步驟 3: 設定圖表佈局 (K線與成交量) ---
+    
+    def create_trendline_chart(self, df: pd.DataFrame, trendline_analysis: Dict, max_lines: int = 3) -> go.Figure:
+        """建立 TradingView 風格的主圖表"""
+        if df is None or len(df) == 0:
+            return None
+            
+        # 創建子圖 (價格 + 成交量)
         fig = make_subplots(
             rows=2, cols=1,
             shared_xaxes=True,
-            vertical_spacing=0.03,
+            vertical_spacing=0.02, # 讓兩張圖靠更近
             row_heights=[0.8, 0.2],
-            specs=[[{"secondary_y": False}], [{"secondary_y": False}]]
+            specs=[[{"secondary_y": True}], [{"secondary_y": False}]]
         )
-
-        # 繪製 K 線 (Candlestick)
+        
+        # 1. K線圖 (Candlestick)
         fig.add_trace(
             go.Candlestick(
-                x=df['x_idx'],
+                x=df['datetime'],
                 open=df['open'], high=df['high'],
                 low=df['low'], close=df['close'],
-                name='K線',
+                name='Price',
                 increasing_line_color=self.colors['up_candle'],
                 decreasing_line_color=self.colors['down_candle'],
                 increasing_fillcolor=self.colors['up_candle'],
-                decreasing_fillcolor=self.colors['down_candle']
-            ), row=1, col=1
+                decreasing_fillcolor=self.colors['down_candle'],
+                showlegend=False
+            ),
+            row=1, col=1
         )
-
-        # 繪製成交量 (Volume)
-        # 判斷顏色：收盤 >= 開盤 為紅，否則為綠
-        colors_vol = [
-            self.colors['volume_up'] if c >= o else self.colors['volume_down']
-            for c, o in zip(df['close'], df['open'])
-        ]
+        
+        # 2. 成交量 (Volume) - 根據漲跌變色
+        colors = [self.colors['volume_up'] if c >= o else self.colors['volume_down'] 
+                 for c, o in zip(df['close'], df['open'])]
         
         fig.add_trace(
             go.Bar(
-                x=df['x_idx'], y=df['volume'],
-                name='成交量', marker_color=colors_vol, showlegend=False
-            ), row=2, col=1
+                x=df['datetime'],
+                y=df['volume'],
+                marker_color=colors,
+                name='Volume',
+                showlegend=False,
+                opacity=0.5 # 讓成交量稍微透明，不搶眼
+            ),
+            row=2, col=1
         )
 
-        # --- 步驟 4: 繪製趨勢線 (座標轉換) ---
-        # 因為 X 軸改成了 Index，所以必須把趨勢線的時間也轉成 Index
-        def plot_lines(lines, color, name):
-            if not lines: return
-            for i, line in enumerate(lines):
-                pts = line.get('points', [])
-                if len(pts) < 2: continue
-                
-                # 取出頭尾兩點
-                p1, p2 = pts[0], pts[-1]
-                
-                # 嘗試轉換時間
-                try:
-                    dt1 = pd.Timestamp(p1[1])
-                    dt2 = pd.Timestamp(p2[1])
-                    
-                    idx1 = time_map.get(dt1)
-                    idx2 = time_map.get(dt2)
-                    
-                    # 只有當兩個點都在目前畫面範圍內才畫
-                    if idx1 is not None and idx2 is not None:
-                        fig.add_trace(
-                            go.Scatter(
-                                x=[idx1, idx2],
-                                y=[float(p1[2]), float(p2[2])],
-                                mode='lines',
-                                line=dict(color=color, width=2),
-                                name=f'{name} {i+1}',
-                                legendgroup=name,
-                                showlegend=(i==0)
-                            ), row=1, col=1
-                        )
-                except Exception:
-                    continue
+        # 3. 繪製趨勢線
+        self._add_trendlines(fig, trendline_analysis, df, max_lines)
+        
+        # 4. 繪製突破點
+        self._add_breakouts(fig, trendline_analysis['breakouts'])
 
-        if support_lines:
-            plot_lines(support_lines, self.colors['support'], '支撐線')
-        if resistance_lines:
-            plot_lines(resistance_lines, self.colors['resistance'], '壓力線')
-
-        # --- 步驟 5: 標記突破點 ---
-        if breakouts:
-            bk_x = []
-            bk_y = []
-            bk_sym = []
-            for b in breakouts:
-                try:
-                    dt = pd.Timestamp(b['datetime'])
-                    idx = time_map.get(dt)
-                    if idx is not None:
-                        bk_x.append(idx)
-                        bk_y.append(float(b['price']))
-                        bk_sym.append('triangle-up' if b['direction'] == 'up' else 'triangle-down')
-                except: continue
-            
-            if bk_x:
-                fig.add_trace(
-                    go.Scatter(
-                        x=bk_x, y=bk_y, mode='markers',
-                        marker=dict(symbol=bk_sym, size=12, color=self.colors['breakout'], line=dict(width=1, color='white')),
-                        name='突破訊號'
-                    ), row=1, col=1
-                )
-
-        # --- 步驟 6: 樣式調整 (TradingView 風格) ---
+        # 更新 Layout 設定 (關鍵：TradingView 風格)
         fig.update_layout(
-            template='plotly_dark',
-            paper_bgcolor=self.colors['background'],
             plot_bgcolor=self.colors['plot_bg'],
-            margin=dict(l=10, r=60, t=30, b=10),
-            xaxis_rangeslider_visible=False, # 隱藏下方 Slider
-            hovermode='x unified',           # 統一游標
-            xaxis=dict(
-                tickmode='array', tickvals=tick_vals, ticktext=tick_text,
-                gridcolor=self.colors['grid'], type='linear'
-            ),
-            yaxis=dict(
-                gridcolor=self.colors['grid'], side='right', zeroline=False
-            ),
-            yaxis2=dict(
-                gridcolor=self.colors['grid'], side='right', zeroline=False, showticklabels=False
-            ),
-            legend=dict(orientation="h", y=1.02, x=0)
+            paper_bgcolor=self.colors['background'],
+            font=dict(color=self.colors['text'], family="Roboto, sans-serif"),
+            margin=dict(l=10, r=10, t=30, b=10), # 縮小邊距
+            height=700,
+            xaxis_rangeslider_visible=False, # 隱藏預設的 rangeslider，因為我們自己控制縮放
+            hovermode='x unified', # 類似 TradingView 的十字游標
+            dragmode='pan', # 預設為平移模式
+        )
+        
+        # 設定 X 軸 (隱藏週末空窗需要更複雜的處理，這裡先用日期時間軸)
+        fig.update_xaxes(
+            showgrid=True, gridcolor=self.colors['grid'], gridwidth=1,
+            linecolor=self.colors['grid'],
+            showspikes=True, spikemode='across', spikesnap='cursor', # 十字線效果
+            spikethickness=1, spikecolor='#555555',
+            rangebreaks=[ dict(bounds=["sat", "mon"]) ] # 嘗試隱藏週末 (對期貨很有用)
+        )
+        
+        fig.update_yaxes(
+            showgrid=True, gridcolor=self.colors['grid'], gridwidth=1,
+            linecolor=self.colors['grid'],
+            side='right', # 價格軸在右邊 (TradingView 預設)
+            showspikes=True, spikemode='across', spikesnap='cursor',
+            spikethickness=1, spikecolor='#555555',
+            row=1, col=1
+        )
+        
+        fig.update_yaxes(
+            showgrid=False, 
+            side='right',
+            row=2, col=1
         )
 
         return fig
 
+    def _add_trendlines(self, fig, analysis, df, max_lines):
+        """繪製延伸趨勢線"""
+        # 輔助函式：計算兩點連線
+        # 為了簡化，直接畫出線段。若要無限延伸，需要計算斜率並推算邊界
+        # 這裡僅畫出分析範圍內的線
+        
+        def plot_lines(lines, color, name_prefix):
+            count = 0
+            for line in lines:
+                if count >= max_lines: break
+                
+                # 取得線段的起點和終點
+                x_coords = [p[1] for p in line['points']] # 時間
+                y_coords = [p[2] for p in line['points']] # 價格
+                
+                # 畫線
+                fig.add_trace(
+                    go.Scatter(
+                        x=[line['start_point'][1], line['end_point'][1]], 
+                        y=[line['start_point'][2], line['end_point'][2]],
+                        mode='lines',
+                        line=dict(color=color, width=2),
+                        name=f'{name_prefix} ({line["touches"]} touches)',
+                        showlegend=True
+                    ),
+                    row=1, col=1
+                )
+                count += 1
+
+        if analysis:
+            plot_lines(analysis['support_lines'], self.colors['support'], 'Support')
+            plot_lines(analysis['resistance_lines'], self.colors['resistance'], 'Resistance')
+
+    def _add_breakouts(self, fig, breakouts):
+        """標記突破點"""
+        for bk in breakouts:
+            symbol = 'triangle-up' if bk['direction'] == 'bullish_breakout' else 'triangle-down'
+            color = '#00ff00' if bk['direction'] == 'bullish_breakout' else '#ff0000'
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=[bk['datetime']],
+                    y=[bk['price']],
+                    mode='markers',
+                    marker=dict(symbol=symbol, size=12, color=color, line=dict(width=2, color='white')),
+                    name='Breakout',
+                    showlegend=False
+                ),
+                row=1, col=1
+            )
+
 def create_metric_cards_html(metrics: Dict) -> str:
-    """
-    創建指標卡片 HTML (保持功能不變，僅微調顏色)
-    """
-    price_change = metrics.get('price_change', 0)
-    change_color = "#ff5252" if price_change >= 0 else "#00e676" # 紅漲綠跌
+    """產生上方數據卡的 HTML"""
+    if not metrics: return ""
     
-    html = f"""
-    <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;">
-        <div style="flex: 1; min-width: 150px; background-color: #1e222d; padding: 15px; border-radius: 8px; border: 1px solid #2a2e39;">
-            <div style="color: #787b86; font-size: 12px; margin-bottom: 5px;">當前價格</div>
-            <div style="color: #d1d4dc; font-size: 24px; font-weight: bold;">{metrics['current_price']:.0f}</div>
-            <div style="color: {change_color}; font-size: 14px;">
+    p_change = metrics.get('price_change', 0)
+    color = "#ef5350" if p_change > 0 else "#26a69a" # 紅漲綠跌
+    
+    return f"""
+    <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+        <div class="metric-container">
+            <div class="metric-label">當前價格</div>
+            <div class="metric-value">{metrics['current_price']:.0f}</div>
+        </div>
+        <div class="metric-container">
+            <div class="metric-label">漲跌幅</div>
+            <div class="metric-value" style="color: {color}">
                 {metrics['price_change']:+.0f} ({metrics['price_change_pct']:+.2f}%)
             </div>
         </div>
-        <div style="flex: 1; min-width: 150px; background-color: #1e222d; padding: 15px; border-radius: 8px; border: 1px solid #2a2e39;">
-            <div style="color: #787b86; font-size: 12px; margin-bottom: 5px;">期間高點</div>
-            <div style="color: #d1d4dc; font-size: 24px; font-weight: bold;">{metrics['period_high']:.0f}</div>
+        <div class="metric-container">
+            <div class="metric-label">最高價</div>
+            <div class="metric-value">{metrics['period_high']:.0f}</div>
         </div>
-        <div style="flex: 1; min-width: 150px; background-color: #1e222d; padding: 15px; border-radius: 8px; border: 1px solid #2a2e39;">
-            <div style="color: #787b86; font-size: 12px; margin-bottom: 5px;">期間低點</div>
-            <div style="color: #d1d4dc; font-size: 24px; font-weight: bold;">{metrics['period_low']:.0f}</div>
+        <div class="metric-container">
+            <div class="metric-label">最低價</div>
+            <div class="metric-value">{metrics['period_low']:.0f}</div>
         </div>
-        <div style="flex: 1; min-width: 150px; background-color: #1e222d; padding: 15px; border-radius: 8px; border: 1px solid #2a2e39;">
-            <div style="color: #787b86; font-size: 12px; margin-bottom: 5px;">總成交量</div>
-            <div style="color: #d1d4dc; font-size: 24px; font-weight: bold;">{metrics['total_volume']:,.0f}</div>
+        <div class="metric-container">
+            <div class="metric-label">資料筆數</div>
+            <div class="metric-value">{metrics['data_points']}</div>
         </div>
     </div>
     """
-    return html
