@@ -74,7 +74,7 @@ class TradingDashboard:
         # 4. 量化分析 (R2 與 勝率)
         q_stats = QuantAnalyzer.run_regression_analysis(df_display, window=len(df_display))
         win_rate = QuantAnalyzer.backtest_breakout_winrate(st.session_state.data, analysis['breakouts'])
-
+        
         # 5. 更新側邊欄驗證報告
         with st.sidebar:
             st.divider()
@@ -87,7 +87,20 @@ class TradingDashboard:
         # 6. 主圖表渲染
         fig = self.chart_visualizer.create_trendline_chart(df_display, analysis, settings['max_trendlines'])
         if fig:
-            st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
+            st.plotly_chart(
+            fig, 
+            use_container_width=True,
+            config={
+                'displayModeBar': True,
+                'modeBarButtonsToAdd': [
+                    'drawline',       # 畫直線
+                    'drawopenpath',   # 畫自由線條
+                    'drawcircle',     # 畫圓形
+                    'drawrect',       # 畫矩形
+                    'eraseshape'      # 橡皮擦 (刪除畫好的線)
+                ]
+            }
+        )
 
 if __name__ == "__main__":
     TradingDashboard().run()

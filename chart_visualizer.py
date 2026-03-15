@@ -85,7 +85,11 @@ class ChartVisualizer:
             height=700,
             xaxis_rangeslider_visible=False, # 隱藏預設的 rangeslider，因為我們自己控制縮放
             hovermode='x unified', # 類似 TradingView 的十字游標
-            dragmode='pan', # 預設為平移模式
+            
+            dragmode='pan',  # 預設滑鼠拖曳模式為「劃線」 (也可設為 'pan' 或 'zoom')
+            newshape_line_color='yellow',  
+            newshape_line_width=2,
+            newshape_opacity=0.8 # 自訂畫筆顏色與粗細
         )
         
         # 設定 X 軸 (隱藏週末空窗需要更複雜的處理，這裡先用日期時間軸)
