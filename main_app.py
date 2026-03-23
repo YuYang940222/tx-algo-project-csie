@@ -39,6 +39,8 @@ class TradingDashboard:
             st.sidebar.subheader("🛡️ 風險控管參數")
             self.stop_loss = st.sidebar.number_input("停損點數 (Stop Loss)", min_value=10, max_value=200, value=30, step=10)
             self.take_profit = st.sidebar.number_input("停利點數 (Take Profit)", min_value=10, max_value=500, value=60, step=10)
+           # 在 sidebar 加入成本設定
+            self.trade_cost = st.sidebar.slider("單邊交易成本 (點數)", 0.0, 5.0, 1.5, 0.5)
            
             with st.expander("⚙️ 技術指標參數"):
                 swing_window = st.number_input("搖擺點視窗", value=5, min_value=2)
@@ -83,7 +85,8 @@ class TradingDashboard:
             st.session_state.data, 
             analysis['breakouts'],
             stop_loss=self.stop_loss,      # 剛剛在 sidebar 定義的變數
-            take_profit=self.take_profit   # 剛剛在 sidebar 定義的變數
+            take_profit=self.take_profit,   # 剛剛在 sidebar 定義的變數
+            cost=self.trade_cost
         )
         # 5. 更新側邊欄驗證報告
         with st.sidebar:
