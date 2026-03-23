@@ -31,9 +31,10 @@ class QuantAnalyzer:
         }
 
     @staticmethod
-    def backtest_breakout_winrate(df, breakouts, forward_bars=10):
-        print(f"\n[DEBUG 報告] 收到 {len(breakouts) if breakouts else 0} 個突破點準備回測...")
-        
+    def backtest_breakout_winrate(df, breakouts, forward_bars=10, stop_loss=30, take_profit=60):
+        """
+        [真實戰場版] 引入固定點數停損停利機制 (預設停損30點，停利60點)
+        """
         if df is None or not breakouts or len(breakouts) == 0:
             return 0.0
             
@@ -41,60 +42,73 @@ class QuantAnalyzer:
         total_valid = 0
         
         work_df = df.copy().reset_index(drop=True)
-        
-        # 🟢 【關鍵修復 1】強制清理所有隱形的空白與格式，再轉成純時間！(把之前不小心刪掉的加回來)
         work_df['datetime'] = pd.to_datetime(work_df['datetime'].astype(str).str.strip(), errors='coerce')
         work_df['datetime'] = work_df['datetime'].apply(lambda x: x.replace(tzinfo=None) if pd.notnull(x) else x)
         
-        # 🟢 【關鍵修復 2】強制把開高低收變成數字 (Float)，避免字母比大小的 Bug！
         for col in ['close', 'high', 'low']:
             work_df[col] = pd.to_numeric(work_df[col], errors='coerce')
             
-        print(f"--- 🔍 開始逐一檢查 {len(breakouts)} 個點 ---")
-        
         for bk in breakouts:
             try:
-                # 突破點的時間也一樣要清理乾淨
                 bk_time = pd.to_datetime(str(bk['datetime']).strip(), errors='coerce').replace(tzinfo=None)
                 
                 time_diff = (work_df['datetime'] - bk_time).abs()
                 idx = time_diff.idxmin()
-                min_diff = time_diff[idx]
                 
-                if pd.isna(idx):
-                    print(f"   ❌ 失敗：找不到對應的 K 棒 (NaT) - 尋找目標: {bk_time}")
-                    continue
-                if min_diff > pd.Timedelta(hours=1):
-                    print(f"   ❌ 失敗：時間誤差太大 (差了 {min_diff}) - 尋找目標: {bk_time}")
+                if pd.isna(idx) or time_diff[idx] > pd.Timedelta(hours=1):
                     continue
                 if idx + forward_bars >= len(work_df):
-                    print(f"   ⏳ 失敗：{bk_time} 太新了，後面沒有 {forward_bars} 根可看")
                     continue
                 
                 total_valid += 1
                 entry_price = float(work_df['close'].iloc[idx])
                 future_data = work_df.iloc[idx + 1 : idx + forward_bars + 1]
                 
-                f_high = float(future_data['high'].max())
-                f_low = float(future_data['low'].min())
-                
                 bk_type = bk.get('type', bk.get('direction', 'resistance'))
                 
                 is_win = False
-                if 'resistance' in bk_type:
-                    is_win = (f_high > entry_price)
-                else:
-                    is_win = (f_low < entry_price)
+                is_closed = False
+                
+                # 逐根 K 棒模擬未來走勢
+                for _, future_bar in future_data.iterrows():
+                    bar_high = float(future_bar['high'])
+                    bar_low = float(future_bar['low'])
                     
+                    if 'resistance' in bk_type:  # 做多 (向上突破)
+                        # 先看最低價有沒有掃到停損
+                        if bar_low <= entry_price - stop_loss:
+                            is_win = False
+                            is_closed = True
+                            break # 出場，結束這筆交易
+                        # 再看最高價有沒有碰到停利
+                        elif bar_high >= entry_price + take_profit:
+                            is_win = True
+                            is_closed = True
+                            break # 獲利入袋，結束這筆交易
+                            
+                    else:  # 做空 (向下突破)
+                        if bar_high >= entry_price + stop_loss:
+                            is_win = False
+                            is_closed = True
+                            break
+                        elif bar_low <= entry_price - take_profit:
+                            is_win = True
+                            is_closed = True
+                            break
+                
+                # 如果過了 10 根 K 棒都沒碰到停損也沒碰到停利，時間到強制平倉 (看最後一根的收盤價)
+                if not is_closed:
+                    final_close = float(future_data.iloc[-1]['close'])
+                    if 'resistance' in bk_type:
+                        is_win = (final_close > entry_price)
+                    else:
+                        is_win = (final_close < entry_price)
+                        
                 if is_win:
                     success_count += 1
                     
-                print(f"   ✅ 成功對位！進場: {entry_price:.0f} | 最高: {f_high:.0f} | 最低: {f_low:.0f} | 獲利: {is_win}")
-                    
             except Exception as e:
-                print(f"   🚨 發生嚴重錯誤: {e}")
-
-        print(f"--- 📊 最終結算: 賺錢 {success_count} 次 / 總共買了 {total_valid} 次 ---\n")
+                continue
         
         if total_valid == 0:
             return 0.0

@@ -30,10 +30,16 @@ class TradingDashboard:
                     st.session_state.data = df
                     st.success(f"成功載入 {len(df)} 筆資料")
 
-            st.markdown("---")
+            st.markdown("---")  
             max_len = 9974 if st.session_state.data is None else len(st.session_state.data)
             lookback_bars = st.slider("顯示 K 棒數量", 50, max_len, min(1300, max_len), 50)
-
+            # 請加在側邊欄 (sidebar) 參數設定的區塊
+            
+            st.sidebar.markdown("---")
+            st.sidebar.subheader("🛡️ 風險控管參數")
+            self.stop_loss = st.sidebar.number_input("停損點數 (Stop Loss)", min_value=10, max_value=200, value=30, step=10)
+            self.take_profit = st.sidebar.number_input("停利點數 (Take Profit)", min_value=10, max_value=500, value=60, step=10)
+           
             with st.expander("⚙️ 技術指標參數"):
                 swing_window = st.number_input("搖擺點視窗", value=5, min_value=2)
                 min_touches = st.number_input("趨勢線接觸點", value=3, min_value=2)
@@ -73,8 +79,12 @@ class TradingDashboard:
         
         # 4. 量化分析 (R2 與 勝率)
         q_stats = QuantAnalyzer.run_regression_analysis(df_display, window=len(df_display))
-        win_rate = QuantAnalyzer.backtest_breakout_winrate(st.session_state.data, analysis['breakouts'])
-        
+        win_rate = QuantAnalyzer.backtest_breakout_winrate(
+            st.session_state.data, 
+            analysis['breakouts'],
+            stop_loss=self.stop_loss,      # 剛剛在 sidebar 定義的變數
+            take_profit=self.take_profit   # 剛剛在 sidebar 定義的變數
+        )
         # 5. 更新側邊欄驗證報告
         with st.sidebar:
             st.divider()

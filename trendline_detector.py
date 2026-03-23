@@ -214,76 +214,64 @@ class TrendlineBreakoutDetector:
     def check_breakouts(self, df: pd.DataFrame, support_lines: List[Dict], 
                         resistance_lines: List[Dict]) -> List[Dict]:
         """
-        檢查歷史 K 棒是否突破趨勢線 (修復版：從趨勢線形成後開始掃描)
+        [極速歷史掃描版] 專為即時網頁優化。
+        找出趨勢線成型後的「第一次」真實突破，兼顧運算速度與回測真實度。
         """
         if len(df) == 0:
             return []
-        
+            
         breakouts = []
         
-        # 1. 檢查阻力突破 (向上突破)
+        # 1. 檢查阻力線突破 (向上突破)
         for resistance in resistance_lines:
-            # 找出這條阻力線的「最後一個接觸點」的索引
+            # 找到這條線「最後一次成型」的 K 棒索引
             last_touch_idx = max(p[0] for p in resistance['points'])
             
-            # 從最後一個接觸點的「下一根 K 棒」開始，往未來一天一天檢查
+            # 從成型後的下一根 K 棒開始，往未來掃描
             for i in range(last_touch_idx + 1, len(df)):
                 bar = df.iloc[i]
-                resistance_price = self.get_line_value(
-                    resistance['slope'], 
-                    resistance['intercept'], 
-                    i
-                )
+                res_price = self.get_line_value(resistance['slope'], resistance['intercept'], i)
                 
-                # 如果收盤價真正突破了這天的阻力線
-                if bar['close'] > resistance_price * (1 + self.breakout_threshold):
+                # 如果這根 K 棒的收盤價，真的突破了這天的阻力線
+                if bar['close'] > res_price * (1 + self.breakout_threshold):
                     breakouts.append({
                         'datetime': bar['datetime'],
                         'price': bar['close'],
                         'direction': 'bullish_breakout',
-                        'type': 'resistance',  # 加上 type 讓量化引擎認得
-                        'trendline_price': resistance_price,
+                        'type': 'resistance', # 量化引擎需要這個來判斷方向
+                        'trendline_price': res_price,
                         'trendline_points': resistance['points'],
                         'strength': resistance['touches'],
                         'strength_score': resistance['strength_score'],
-                        'breakout_magnitude': (bar['close'] - resistance_price) / resistance_price
+                        'breakout_magnitude': (bar['close'] - res_price) / res_price
                     })
-                    # 找到這條線的第一次突破後，就換檢查下一條線 (避免重複抓同一條線)
+                    # 找到第一次真實突破後，就跳出迴圈，這條線功成身退
                     break 
-        
-        # 2. 檢查支撐跌破 (向下突破)
+                    
+        # 2. 檢查支撐線跌破 (向下突破)
         for support in support_lines:
-            # 找出這條支撐線的「最後一個接觸點」的索引
             last_touch_idx = max(p[0] for p in support['points'])
             
-            # 從最後一個接觸點的「下一根 K 棒」開始檢查
             for i in range(last_touch_idx + 1, len(df)):
                 bar = df.iloc[i]
-                support_price = self.get_line_value(
-                    support['slope'], 
-                    support['intercept'], 
-                    i
-                )
+                supp_price = self.get_line_value(support['slope'], support['intercept'], i)
                 
-                # 如果收盤價跌破了這天的支撐線
-                if bar['close'] < support_price * (1 - self.breakout_threshold):
+                if bar['close'] < supp_price * (1 - self.breakout_threshold):
                     breakouts.append({
                         'datetime': bar['datetime'],
                         'price': bar['close'],
                         'direction': 'bearish_breakdown',
-                        'type': 'support', # 加上 type 讓量化引擎認得
-                        'trendline_price': support_price,
+                        'type': 'support', 
+                        'trendline_price': supp_price,
                         'trendline_points': support['points'],
                         'strength': support['touches'],
                         'strength_score': support['strength_score'],
-                        'breakout_magnitude': (support_price - bar['close']) / support_price
+                        'breakout_magnitude': (supp_price - bar['close']) / supp_price
                     })
-                    # 找到第一次跌破就換下一條線
                     break
-        
-        # 按時間先後順序排列突破點
+                    
+        # 按照時間先後排序，讓圖表渲染更順暢
         breakouts.sort(key=lambda x: x['datetime'])
-        
         return breakouts
     
     def analyze(self, df: pd.DataFrame) -> Dict:
