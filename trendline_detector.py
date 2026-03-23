@@ -214,63 +214,69 @@ class TrendlineBreakoutDetector:
     def check_breakouts(self, df: pd.DataFrame, support_lines: List[Dict], 
                         resistance_lines: List[Dict]) -> List[Dict]:
         """
-        [極速歷史掃描版] 專為即時網頁優化。
-        找出趨勢線成型後的「第一次」真實突破，兼顧運算速度與回測真實度。
+        [進化版] 加入成交量過濾 (Volume Filter)
+        條件：突破當下的成交量 > 過去 5 根平均成交量的 1.5 倍
         """
-        if len(df) == 0:
+        if len(df) < 6: # 確保有足夠資料算平均成交量
             return []
             
         breakouts = []
         
-        # 1. 檢查阻力線突破 (向上突破)
+        # 先算好全域的成交量移動平均，省去重複計算
+        # window=5 代表看過去 5 根
+        df['vol_ma'] = df['volume'].rolling(window=5).mean()
+
+        # 1. 檢查阻力線突破
         for resistance in resistance_lines:
-            # 找到這條線「最後一次成型」的 K 棒索引
             last_touch_idx = max(p[0] for p in resistance['points'])
             
-            # 從成型後的下一根 K 棒開始，往未來掃描
             for i in range(last_touch_idx + 1, len(df)):
                 bar = df.iloc[i]
                 res_price = self.get_line_value(resistance['slope'], resistance['intercept'], i)
                 
-                # 如果這根 K 棒的收盤價，真的突破了這天的阻力線
-                if bar['close'] > res_price * (1 + self.breakout_threshold):
+                # --- 核心邏輯：價格突破 + 成交量達標 ---
+                price_break = bar['close'] > res_price * (1 + self.breakout_threshold)
+                
+                # 這裡就是「體力檢查」：當前量 > 5根均量的 1.5 倍
+                # 注意：我們通常看 i-1 (突破前一根的均量) 會更嚴謹
+                avg_vol = df['vol_ma'].iloc[i-1] if i > 0 else bar['volume']
+                volume_confirm = bar['volume'] > (avg_vol * 1.5)
+                
+                if price_break and volume_confirm:
                     breakouts.append({
                         'datetime': bar['datetime'],
                         'price': bar['close'],
                         'direction': 'bullish_breakout',
-                        'type': 'resistance', # 量化引擎需要這個來判斷方向
-                        'trendline_price': res_price,
+                        'type': 'resistance',
                         'trendline_points': resistance['points'],
-                        'strength': resistance['touches'],
-                        'strength_score': resistance['strength_score'],
-                        'breakout_magnitude': (bar['close'] - res_price) / res_price
+                        'volume_ratio': bar['volume'] / avg_vol if avg_vol > 0 else 1.0
                     })
-                    # 找到第一次真實突破後，就跳出迴圈，這條線功成身退
                     break 
                     
-        # 2. 檢查支撐線跌破 (向下突破)
+        # 2. 檢查支撐線跌破 (同樣加入成交量過濾)
         for support in support_lines:
             last_touch_idx = max(p[0] for p in support['points'])
-            
             for i in range(last_touch_idx + 1, len(df)):
                 bar = df.iloc[i]
                 supp_price = self.get_line_value(support['slope'], support['intercept'], i)
                 
-                if bar['close'] < supp_price * (1 - self.breakout_threshold):
+                price_break = bar['close'] < supp_price * (1 - self.breakout_threshold)
+                
+                # 下跌突破有時候不一定要大放量，但加上過濾會更安全
+                avg_vol = df['vol_ma'].iloc[i-1] if i > 0 else bar['volume']
+                volume_confirm = bar['volume'] > (avg_vol * 1.5)
+                
+                if price_break and volume_confirm:
                     breakouts.append({
                         'datetime': bar['datetime'],
                         'price': bar['close'],
                         'direction': 'bearish_breakdown',
-                        'type': 'support', 
-                        'trendline_price': supp_price,
+                        'type': 'support',
                         'trendline_points': support['points'],
-                        'strength': support['touches'],
-                        'strength_score': support['strength_score'],
-                        'breakout_magnitude': (supp_price - bar['close']) / supp_price
+                        'volume_ratio': bar['volume'] / avg_vol if avg_vol > 0 else 1.0
                     })
                     break
                     
-        # 按照時間先後排序，讓圖表渲染更順暢
         breakouts.sort(key=lambda x: x['datetime'])
         return breakouts
     
