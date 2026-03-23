@@ -120,8 +120,27 @@ class QuantAnalyzer:
             except Exception:
                 continue
 
-        if total_valid == 0: return 0.0
+        if total_valid == 0: 
+            return {'win_rate': 0.0, 'expectancy': 0.0, 'total_signals': 0}
         
-        final_rate = (success_count / total_valid) * 100.0
-        print(f"--- 結算: 勝率 {final_rate:.1f}% (樣本: {total_valid}) ---")
-        return final_rate
+        # --- 期望值計算邏輯 ---
+        # 贏的時候賺 take_profit，輸的時候賠 stop_loss
+        fail_count = total_valid - success_count
+        total_pnl = (success_count * take_profit) - (fail_count * stop_loss)
+        
+        # 🚨 重要：扣除總成本 (進場一次、出場一次，所以每筆交易扣 2 * cost)
+        net_pnl = total_pnl - (total_valid * cost * 2)
+        
+        # 平均每筆交易預期賺賠多少點
+        expectancy = net_pnl / total_valid
+        win_rate = (success_count / total_valid) * 100.0
+        
+        print(f"--- 結算: 勝率 {win_rate:.1f}% | 期望值: {expectancy:.2f} 點 ---")
+        
+        # 回傳字典，讓 main_app 可以一次拿走所有數據
+        return {
+            'win_rate': win_rate,
+            'expectancy': expectancy,
+            'total_signals': total_valid
+        }
+       

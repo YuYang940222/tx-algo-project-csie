@@ -33,15 +33,13 @@ class TradingDashboard:
             st.markdown("---")  
             max_len = 9974 if st.session_state.data is None else len(st.session_state.data)
             lookback_bars = st.slider("顯示 K 棒數量", 50, max_len, min(1300, max_len), 50)
-            # 請加在側邊欄 (sidebar) 參數設定的區塊
             
             st.sidebar.markdown("---")
             st.sidebar.subheader("🛡️ 風險控管參數")
             self.stop_loss = st.sidebar.number_input("停損點數 (Stop Loss)", min_value=10, max_value=200, value=30, step=10)
             self.take_profit = st.sidebar.number_input("停利點數 (Take Profit)", min_value=10, max_value=500, value=60, step=10)
-           # 在 sidebar 加入成本設定
             self.trade_cost = st.sidebar.slider("單邊交易成本 (點數)", 0.0, 5.0, 1.5, 0.5)
-           
+            
             with st.expander("⚙️ 技術指標參數"):
                 swing_window = st.number_input("搖擺點視窗", value=5, min_value=2)
                 min_touches = st.number_input("趨勢線接觸點", value=3, min_value=2)
@@ -70,7 +68,7 @@ class TradingDashboard:
         metrics = calculate_basic_metrics(df_display)
         st.markdown(create_metric_cards_html(metrics), unsafe_allow_html=True)
         
-        # 3. 執行偵測 (每次 run 都重新計算，解決點數累加問題)
+        # 3. 執行偵測
         detector = TrendlineBreakoutDetector(
             swing_window=settings['swing_window'],
             min_touches=settings['min_touches'],
@@ -79,41 +77,44 @@ class TradingDashboard:
         )
         analysis = detector.analyze(df_display)
         
-        # 4. 量化分析 (R2 與 勝率)
-        q_stats = QuantAnalyzer.run_regression_analysis(df_display, window=len(df_display))
-        win_rate = QuantAnalyzer.backtest_breakout_winrate(
-            st.session_state.data, 
-            analysis['breakouts'],
-            stop_loss=self.stop_loss,      # 剛剛在 sidebar 定義的變數
-            take_profit=self.take_profit,   # 剛剛在 sidebar 定義的變數
+        # 4. 量化分析 (接收結果字典)
+        report = QuantAnalyzer.backtest_breakout_winrate(
+            df=st.session_state.data, 
+            breakouts=analysis['breakouts'],
+            stop_loss=self.stop_loss,
+            take_profit=self.take_profit,
             cost=self.trade_cost
         )
+
+        # 4.5 另外也要跑回歸分析拿 q_stats
+        q_stats = QuantAnalyzer.run_regression_analysis(df_display, window=len(df_display))
+
         # 5. 更新側邊欄驗證報告
         with st.sidebar:
             st.divider()
             st.header("🔬 量化驗證報告")
             c1, c2 = st.columns(2)
-            c1.metric("歷史勝率", f"{win_rate:.1f}%")
-            c2.metric("趨勢信心 (R²)", f"{q_stats['confidence']:.1f}%")
-            st.caption(f"當前視窗偵測到 {len(analysis['breakouts'])} 個訊號點")
+            
+            c1.metric("歷史勝率", f"{report['win_rate']:.1f}%")
+            
+            # 期望值顏色
+            exp_color = "normal" if report['expectancy'] >= 0 else "inverse"
+            c2.metric("期望值 (每筆)", f"{report['expectancy']:.1f} 點", delta_color=exp_color)
+            
+            st.metric("趨勢信心 (R²)", f"{q_stats['confidence']:.1f}%")
+            st.caption(f"當前視窗偵測到 {report['total_signals']} 個訊號點")
 
         # 6. 主圖表渲染
         fig = self.chart_visualizer.create_trendline_chart(df_display, analysis, settings['max_trendlines'])
         if fig:
             st.plotly_chart(
-            fig, 
-            use_container_width=True,
-            config={
-                'displayModeBar': True,
-                'modeBarButtonsToAdd': [
-                    'drawline',       # 畫直線
-                    'drawopenpath',   # 畫自由線條
-                    'drawcircle',     # 畫圓形
-                    'drawrect',       # 畫矩形
-                    'eraseshape'      # 橡皮擦 (刪除畫好的線)
-                ]
-            }
-        )
+                fig, 
+                use_container_width=True,
+                config={
+                    'displayModeBar': True,
+                    'modeBarButtonsToAdd': ['drawline', 'drawopenpath', 'drawcircle', 'drawrect', 'eraseshape']
+                }
+            )
 
 if __name__ == "__main__":
     TradingDashboard().run()
