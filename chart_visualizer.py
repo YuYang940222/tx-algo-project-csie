@@ -151,23 +151,57 @@ class ChartVisualizer:
             plot_lines(analysis['support_lines'], self.colors['support'], 'Support')
             plot_lines(analysis['resistance_lines'], self.colors['resistance'], 'Resistance')
 
-    def _add_breakouts(self, fig, breakouts):
-        """標記突破點"""
+    def _add_breakouts(self, fig: go.Figure, breakouts: List[Dict]):
+        """
+        [優化版] 將突破點打包成單一圖層，解決 tooltip 重疊疊羅漢的問題。
+        並將做多(紅/綠)與做空(綠/紅)分開畫，方便辨識。
+        """
+        if not breakouts:
+            return
+
+        # 準備四個空籃子，把做多和做空的點分開裝
+        bull_times, bull_prices = [], []
+        bear_times, bear_prices = [], []
+
         for bk in breakouts:
-            symbol = 'triangle-up' if bk['direction'] == 'bullish_breakout' else 'triangle-down'
-            color = '#00ff00' if bk['direction'] == 'bullish_breakout' else '#ff0000'
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=[bk['datetime']],
-                    y=[bk['price']],
-                    mode='markers',
-                    marker=dict(symbol=symbol, size=12, color=color, line=dict(width=2, color='white')),
-                    name='Breakout',
-                    showlegend=False
+            if 'bullish' in bk['direction']:
+                bull_times.append(bk['datetime'])
+                bull_prices.append(bk['price'])
+            else:
+                bear_times.append(bk['datetime'])
+                bear_prices.append(bk['price'])
+
+        # 一次性畫上所有「做多」的突破點 (綠色向上三角形)
+        if bull_times:
+            fig.add_trace(go.Scatter(
+                x=bull_times,
+                y=bull_prices,
+                mode='markers',
+                marker=dict(
+                    symbol='triangle-up', 
+                    size=14, 
+                    color='#00E676', # 亮綠色
+                    line=dict(width=1, color='black')
                 ),
-                row=1, col=1
-            )
+                name='向上突破',
+                hoverinfo='x+y'  # 👈 這行是去重的魔法，只顯示座標，不顯示一長串 name
+            ), row=1, col=1)
+
+        # 一次性畫上所有「做空」的跌破點 (紅色向下三角形)
+        if bear_times:
+            fig.add_trace(go.Scatter(
+                x=bear_times,
+                y=bear_prices,
+                mode='markers',
+                marker=dict(
+                    symbol='triangle-down', 
+                    size=14, 
+                    color='#FF5252', # 亮紅色
+                    line=dict(width=1, color='black')
+                ),
+                name='向下突破',
+                hoverinfo='x+y'  # 👈 同上，保持 tooltip 乾淨
+            ), row=1, col=1)
 
 def create_metric_cards_html(metrics: Dict) -> str:
     """產生上方數據卡的 HTML"""

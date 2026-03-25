@@ -214,19 +214,14 @@ class TrendlineBreakoutDetector:
     def check_breakouts(self, df: pd.DataFrame, support_lines: List[Dict], 
                         resistance_lines: List[Dict]) -> List[Dict]:
         """
-        [進化版] 加入成交量過濾 (Volume Filter)
-        條件：突破當下的成交量 > 過去 5 根平均成交量的 1.5 倍
+        [穩定版] 純價格突破判斷 + 訊號去重
         """
-        if len(df) < 6: # 確保有足夠資料算平均成交量
+        if len(df) < 2: 
             return []
             
         breakouts = []
-        
-        # 先算好全域的成交量移動平均，省去重複計算
-        # window=5 代表看過去 5 根
-        df['vol_ma'] = df['volume'].rolling(window=5).mean()
 
-        # 1. 檢查阻力線突破
+        # 1. 檢查阻力線突破 (做多)
         for resistance in resistance_lines:
             last_touch_idx = max(p[0] for p in resistance['points'])
             
@@ -234,51 +229,50 @@ class TrendlineBreakoutDetector:
                 bar = df.iloc[i]
                 res_price = self.get_line_value(resistance['slope'], resistance['intercept'], i)
                 
-                # --- 核心邏輯：價格突破 + 成交量達標 ---
-                price_break = bar['close'] > res_price * (1 + self.breakout_threshold)
-                
-                # 這裡就是「體力檢查」：當前量 > 5根均量的 1.5 倍
-                # 注意：我們通常看 i-1 (突破前一根的均量) 會更嚴謹
-                avg_vol = df['vol_ma'].iloc[i-1] if i > 0 else bar['volume']
-                volume_confirm = bar['volume'] > (avg_vol * 1.5)
-                
-                if price_break and volume_confirm:
+                # 純看價格有沒有突破閥值
+                if bar['close'] > res_price * (1 + self.breakout_threshold):
                     breakouts.append({
                         'datetime': bar['datetime'],
                         'price': bar['close'],
                         'direction': 'bullish_breakout',
                         'type': 'resistance',
-                        'trendline_points': resistance['points'],
-                        'volume_ratio': bar['volume'] / avg_vol if avg_vol > 0 else 1.0
+                        'trendline_points': resistance['points']
                     })
-                    break 
+                    break  # 突破一次就結束這條線的偵測
                     
-        # 2. 檢查支撐線跌破 (同樣加入成交量過濾)
+        # 2. 檢查支撐線跌破 (做空)
         for support in support_lines:
             last_touch_idx = max(p[0] for p in support['points'])
             for i in range(last_touch_idx + 1, len(df)):
                 bar = df.iloc[i]
                 supp_price = self.get_line_value(support['slope'], support['intercept'], i)
                 
-                price_break = bar['close'] < supp_price * (1 - self.breakout_threshold)
-                
-                # 下跌突破有時候不一定要大放量，但加上過濾會更安全
-                avg_vol = df['vol_ma'].iloc[i-1] if i > 0 else bar['volume']
-                volume_confirm = bar['volume'] > (avg_vol * 1.5)
-                
-                if price_break and volume_confirm:
+                # 純看價格有沒有跌破閥值
+                if bar['close'] < supp_price * (1 - self.breakout_threshold):
                     breakouts.append({
                         'datetime': bar['datetime'],
                         'price': bar['close'],
                         'direction': 'bearish_breakdown',
                         'type': 'support',
-                        'trendline_points': support['points'],
-                        'volume_ratio': bar['volume'] / avg_vol if avg_vol > 0 else 1.0
+                        'trendline_points': support['points']
                     })
                     break
                     
+        # 3. 按時間排序
         breakouts.sort(key=lambda x: x['datetime'])
-        return breakouts
+
+        # 4. ✨ 訊號去重：確保同一根 K 棒只會有一個三角形
+        unique_breakouts = []
+        seen_times = set()
+
+        for bk in breakouts:
+            time_tag = str(bk['datetime'])
+            if time_tag not in seen_times:
+                unique_breakouts.append(bk)
+                seen_times.add(time_tag)
+
+        return unique_breakouts
+        
     
     def analyze(self, df: pd.DataFrame) -> Dict:
         """
