@@ -26,121 +26,111 @@ class QuantAnalyzer:
 
     @staticmethod
     def backtest_breakout_winrate(df, breakouts, forward_bars=10, stop_loss=30, take_profit=60, cost=2):
-        """
-        [實戰回測引擎] 
-        1. 強制對位：解決找不到 K 棒的問題
-        2. 停損停利：解決 97% 虛假勝率問題
-        3. 交易成本：模擬真實手續費與滑價 (預設每口扣 2 點)
-        """
-        if df is None or not breakouts or len(breakouts) == 0:
-            return 0.0
-            
-        success_count = 0
-        total_valid = 0
+        """實戰回測引擎 (多空分離版)"""
         
-        # 準備資料：強制轉型與清理
+
+        # 準備記分板：整體、做多、做空
+        total_valid, success_count = 0, 0
+        long_valid, long_success = 0, 0
+        short_valid, short_success = 0, 0
+        
         work_df = df.copy().reset_index(drop=True)
         work_df['datetime'] = pd.to_datetime(work_df['datetime'].astype(str).str.strip(), errors='coerce')
         work_df['datetime'] = work_df['datetime'].apply(lambda x: x.replace(tzinfo=None) if pd.notnull(x) else x)
-        
         for col in ['close', 'high', 'low']:
             work_df[col] = pd.to_numeric(work_df[col], errors='coerce')
-        
-        # --- 計算 ATR (作為未來動態參考，目前先用固定點數) ---
-        # tr = np.maximum(work_df['high'] - work_df['low'], 
-        #                np.maximum(abs(work_df['high'] - work_df['close'].shift(1)), 
-        #                           abs(work_df['low'] - work_df['close'].shift(1))))
-        # work_df['atr'] = tr.rolling(window=14).mean()
 
-        print(f"\n--- 🚀 開始實戰回測 (成本: {cost} 點) ---")
-        
         for bk in breakouts:
             try:
-                # 1. 精準對位
                 bk_time = pd.to_datetime(str(bk['datetime']).strip(), errors='coerce').replace(tzinfo=None)
                 time_diff = (work_df['datetime'] - bk_time).abs()
                 idx = time_diff.idxmin()
                 
-                # 排除太靠近現在或找不到的點
                 if pd.isna(idx) or time_diff[idx] > pd.Timedelta(hours=1) or idx + forward_bars >= len(work_df):
                     continue
                 
                 total_valid += 1
-                
-                # 2. 加入交易成本 (滑價 + 手續費)
-                # 做多買進：你會買得比收盤價貴 (加上 cost)
-                # 做空賣出：你會賣得比收盤價便宜 (扣掉 cost)
                 raw_close = float(work_df['close'].iloc[idx])
                 bk_type = bk.get('type', bk.get('direction', 'resistance'))
                 
+                # 判斷多空方向，並記錄次數
                 if 'resistance' in bk_type or 'bullish' in bk_type:
                     entry_price = raw_close + cost
                     mode = "LONG"
+                    long_valid += 1
                 else:
                     entry_price = raw_close - cost
                     mode = "SHORT"
+                    short_valid += 1
                 
-                # 3. 逐根檢查未來走勢
                 future_data = work_df.iloc[idx + 1 : idx + forward_bars + 1]
                 is_win = False
                 is_closed = False
                 
+                # 逐根檢查停損停利
                 for _, bar in future_data.iterrows():
                     h, l, c = float(bar['high']), float(bar['low']), float(bar['close'])
-                    
                     if mode == "LONG":
-                        # 檢查是否先掃到停損
                         if l <= entry_price - stop_loss:
-                            is_win = False
-                            is_closed = True
+                            is_win, is_closed = False, True
                             break
-                        # 檢查是否達到停利
                         elif h >= entry_price + take_profit:
-                            is_win = True
-                            is_closed = True
+                            is_win, is_closed = True, True
                             break
-                    else: # SHORT
+                    else:
                         if h >= entry_price + stop_loss:
-                            is_win = False
-                            is_closed = True
+                            is_win, is_closed = False, True
                             break
                         elif l <= entry_price - take_profit:
-                            is_win = True
-                            is_closed = True
+                            is_win, is_closed = True, True
                             break
                 
-                # 如果時間到還沒分勝負，強制平倉
                 if not is_closed:
                     final_c = float(future_data.iloc[-1]['close'])
                     is_win = (final_c > entry_price) if mode == "LONG" else (final_c < entry_price)
                 
+                # 結算勝場
                 if is_win:
                     success_count += 1
-                    
+                    if mode == "LONG":
+                        long_success += 1
+                    else:
+                        short_success += 1
+                        
             except Exception:
                 continue
 
         if total_valid == 0: 
-            return {'win_rate': 0.0, 'expectancy': 0.0, 'total_signals': 0}
-        
-        # --- 期望值計算邏輯 ---
-        # 贏的時候賺 take_profit，輸的時候賠 stop_loss
+            return {'win_rate': 0.0, 'expectancy': 0.0, 'total_signals': 0,
+                    'long_win_rate': 0.0, 'long_exp': 0.0, 'long_signals': 0,
+                    'short_win_rate': 0.0, 'short_exp': 0.0, 'short_signals': 0}
+
+        # --- 計算整體期望值 ---
         fail_count = total_valid - success_count
-        total_pnl = (success_count * take_profit) - (fail_count * stop_loss)
-        
-        # 🚨 重要：扣除總成本 (進場一次、出場一次，所以每筆交易扣 2 * cost)
-        net_pnl = total_pnl - (total_valid * cost * 2)
-        
-        # 平均每筆交易預期賺賠多少點
+        net_pnl = (success_count * take_profit) - (fail_count * stop_loss) - (total_valid * cost * 2)
         expectancy = net_pnl / total_valid
         win_rate = (success_count / total_valid) * 100.0
         
-        print(f"--- 結算: 勝率 {win_rate:.1f}% | 期望值: {expectancy:.2f} 點 ---")
-        
-        # 回傳字典，讓 main_app 可以一次拿走所有數據
+        # --- 計算做多期望值 ---
+        long_exp = 0.0
+        long_win_rate = 0.0
+        if long_valid > 0:
+            long_fail = long_valid - long_success
+            long_pnl = (long_success * take_profit) - (long_fail * stop_loss) - (long_valid * cost * 2)
+            long_exp = long_pnl / long_valid
+            long_win_rate = (long_success / long_valid) * 100.0
+
+        # --- 計算做空期望值 ---
+        short_exp = 0.0
+        short_win_rate = 0.0
+        if short_valid > 0:
+            short_fail = short_valid - short_success
+            short_pnl = (short_success * take_profit) - (short_fail * stop_loss) - (short_valid * cost * 2)
+            short_exp = short_pnl / short_valid
+            short_win_rate = (short_success / short_valid) * 100.0
+
         return {
-            'win_rate': win_rate,
-            'expectancy': expectancy,
-            'total_signals': total_valid
+            'win_rate': win_rate, 'expectancy': expectancy, 'total_signals': total_valid,
+            'long_win_rate': long_win_rate, 'long_exp': long_exp, 'long_signals': long_valid,
+            'short_win_rate': short_win_rate, 'short_exp': short_exp, 'short_signals': short_valid
         }
-       

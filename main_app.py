@@ -89,20 +89,40 @@ class TradingDashboard:
         # 4.5 另外也要跑回歸分析拿 q_stats
         q_stats = QuantAnalyzer.run_regression_analysis(df_display, window=len(df_display))
 
-        # 5. 更新側邊欄驗證報告
+        # 5. 更新側邊欄驗證報告 (多空分離版)
         with st.sidebar:
             st.divider()
             st.header("🔬 量化驗證報告")
-            c1, c2 = st.columns(2)
             
-            c1.metric("歷史勝率", f"{report['win_rate']:.1f}%")
+            # 建立三個分頁標籤
+            tab1, tab2, tab3 = st.tabs(["📊 整體", "📈 做多", "📉 做空"])
             
-            # 期望值顏色
-            exp_color = "normal" if report['expectancy'] >= 0 else "inverse"
-            c2.metric("期望值 (每筆)", f"{report['expectancy']:.1f} 點", delta_color=exp_color)
-            
+            # 第一頁：整體戰績
+            with tab1:
+                c1, c2 = st.columns(2)
+                c1.metric("整體勝率", f"{report['win_rate']:.1f}%")
+                exp_color = "normal" if report['expectancy'] >= 0 else "inverse"
+                c2.metric("期望值", f"{report['expectancy']:.1f} 點", delta_color=exp_color)
+                st.caption(f"總訊號：{report['total_signals']} 個")
+                
+            # 第二頁：只看做多
+            with tab2:
+                c1, c2 = st.columns(2)
+                c1.metric("做多勝率", f"{report['long_win_rate']:.1f}%")
+                lexp_color = "normal" if report['long_exp'] >= 0 else "inverse"
+                c2.metric("多軍期望值", f"{report['long_exp']:.1f} 點", delta_color=lexp_color)
+                st.caption(f"做多訊號：{report['long_signals']} 個")
+                
+            # 第三頁：只看做空
+            with tab3:
+                c1, c2 = st.columns(2)
+                c1.metric("做空勝率", f"{report['short_win_rate']:.1f}%")
+                sexp_color = "normal" if report['short_exp'] >= 0 else "inverse"
+                c2.metric("空軍期望值", f"{report['short_exp']:.1f} 點", delta_color=sexp_color)
+                st.caption(f"做空訊號：{report['short_signals']} 個")
+
+            st.divider()
             st.metric("趨勢信心 (R²)", f"{q_stats['confidence']:.1f}%")
-            st.caption(f"當前視窗偵測到 {report['total_signals']} 個訊號點")
 
         # 6. 主圖表渲染
         fig = self.chart_visualizer.create_trendline_chart(df_display, analysis, settings['max_trendlines'])
