@@ -11,7 +11,7 @@ from trendline_detector import TrendlineBreakoutDetector
 from quant_analyzer import QuantAnalyzer
 
 # --- 核心參數調整 ---
-LOOKBACK_BARS = 2000           # 測試的總 K 棒數量
+LOOKBACK_BARS = 1000           # 測試的總 K 棒數量
 MIN_SIGNALS_THRESHOLD = 10     # 最少要有 10 次訊號，才具備統計意義
 FORWARD_BARS = 10              # 裁判：我們固定看突破後第 10 根 K 棒的表現 (不設停損停利)
 
