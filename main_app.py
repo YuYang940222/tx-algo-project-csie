@@ -43,7 +43,7 @@ class TradingDashboard:
             with st.expander("⚙️ 技術指標參數"):
                 swing_window = st.number_input("搖擺點視窗", value=5, min_value=2)
                 min_touches = st.number_input("趨勢線接觸點", value=3, min_value=2)
-                breakout_threshold = st.number_input("突破閥值(%)", 0.3, step=0.1) / 100
+                breakout_threshold = st.number_input("突破閥值(%)", min_value=0.0, value=0.3, step=0.1) / 100
             
             return {
                 'lookback_bars': lookback_bars,
