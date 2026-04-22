@@ -15,13 +15,13 @@ from trendline_detector import TrendlineBreakoutDetector
 
 # --- 2. 核心參數 ---
 BEST_TOUCHES = 3
-BEST_WINDOW = 30
+BEST_WINDOW = 20
 BEST_THRESHOLD = 0.0025
 
 # 修正建議：將過濾門檻拉高到 0.1% (0.001) 試試看
-MIN_AMPLITUDE = 0.003  
+MIN_AMPLITUDE = 0.0025
 
-LOOKBACK_BARS = 1000  
+LOOKBACK_BARS = 9000  
 FORWARD_BARS = 10     
 
 def get_single_trade_result(df, entry_idx, forward_bars):
