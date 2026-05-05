@@ -11,7 +11,7 @@ from trendline_detector import TrendlineBreakoutDetector
 from quant_analyzer import QuantAnalyzer
 
 # --- 核心參數調整 ---
-LOOKBACK_BARS = 1000           
+LOOKBACK_BARS = 9000           
 MIN_SIGNALS_THRESHOLD = 10      # 💡 提示：因為 Touches 增加，建議稍微調低門檻 (例如 5)，否則 Touches=5 可能會全白
 FORWARD_BARS = 10              
 

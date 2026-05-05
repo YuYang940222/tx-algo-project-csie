@@ -242,31 +242,47 @@ class TradingDashboard:
                                     target_exp_points = temp_report['short_exp']
                                 
                                 exp_ntd = target_exp_points * self.multiplier * self.contracts
+                                roi = (exp_ntd / self.total_capital) * 100 if self.total_capital > 0 else 0
                                 opt_results.append({
                                     'Stop Loss': sl,
                                     'Take Profit': tp,
-                                    'Net Profit (NTD)': exp_ntd
+                                    'Net Profit (NTD)': exp_ntd,
+                                    'ROI (%)': roi
                                 })
-                        
+                        # 1. 將迴圈算出的資料轉成 DataFrame
                         res_df = pd.DataFrame(opt_results)
-                        pivot_df = res_df.pivot(index="Stop Loss", columns="Take Profit", values="Net Profit (NTD)")
-                        
+                        pivot_roi= res_df.pivot(index="Stop Loss", columns="Take Profit", values="ROI (%)")
+                        pivot_ntd = res_df.pivot(index="Stop Loss", columns="Take Profit", values="Net Profit (NTD)")   
+                        text_matrix = []
+                        for roi_row, ntd_row in zip(pivot_roi.values, pivot_ntd.values):
+                            text_matrix.append([f"{r:.2f}%<br>${n:,.0f}" for r, n in zip(roi_row, ntd_row)])
                         heatmap_fig = go.Figure(data=go.Heatmap(
-                            z=pivot_df.values,
-                            x=pivot_df.columns,  
-                            y=pivot_df.index,    
-                            colorscale='RdYlGn', 
-                            zmid=0,              
-                            texttemplate="$%{z:,.0f}", 
-                            textfont={"size": 10},
+                            z=pivot_roi.values, 
+                            x=pivot_roi.columns,  
+                            y=pivot_roi.index,
+                            colorscale='RdYlGn',
+                            zmid=0,
+                            text=text_matrix,
+                            texttemplate="%{text}", 
+                            customdata=pivot_ntd.values,                           
+                            hovertemplate=(
+                                "<b>設定參數</b><br>"
+                                "停損 (SL): %{y} 點<br>"
+                                "停利 (TP): %{x} 點<br>"
+                                "---<br>"
+                                "<b>預期績效</b><br>"
+                                "報酬率 (ROI): <b>%{z:.2f}%</b><br>"
+                                "總淨利 (NTD): <b>$%{customdata:,.0f}</b><extra></extra>"
+                            ), 
+                            textfont={"size": 9},
                             hoverongaps=False
                         ))
                         
                         heatmap_fig.update_layout(
-                            title=f"【{opt_direction}】期望值熱力圖 (NTD)",
+                            title=f"【{opt_direction}】預期投資報酬率 (ROI) 熱力圖",
                             xaxis_title="停利點數 (Take Profit)",
                             yaxis_title="停損點數 (Stop Loss)",
-                            height=600,
+                            height=700,
                             margin=dict(l=50, r=50, t=50, b=50)
                         )
                         
