@@ -54,7 +54,7 @@ class TradingDashboard:
             self.total_capital = st.number_input(f"帳戶總投入資金 (NTD)", min_value=10000, value=default_capital, step=10000)
             
             st.markdown("---")
-            st.subheader("🛡️ 單次回測風險參數")
+            st.subheader("🛡️ 特定參數詳細回測")
             self.stop_loss = st.number_input("停損點數 (Stop Loss)", min_value=10, max_value=200, value=30, step=10)
             self.take_profit = st.number_input("停利點數 (Take Profit)", min_value=10, max_value=500, value=60, step=10)
             
@@ -274,7 +274,7 @@ class TradingDashboard:
                                 "報酬率 (ROI): <b>%{z:.2f}%</b><br>"
                                 "總淨利 (NTD): <b>$%{customdata:,.0f}</b><extra></extra>"
                             ), 
-                            textfont={"size": 9},
+                            textfont={"size": 14},
                             hoverongaps=False
                         ))
                         
